@@ -8,18 +8,21 @@ from pathlib import Path
 
 from src.config import JiraConfig
 from src.exporter import JiraExporter
+from src.ppt_exporter import PPTTemplateFiller
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Export JIRA tickets to structured JSON.",
+        description="Export JIRA tickets to structured JSON and/or PowerPoint.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python -m src.main                          # uses config.json\n"
+            "  python -m src.main                          # JSON export only\n"
+            "  python -m src.main --ppt                    # JSON + PPTX export\n"
             "  python -m src.main -c my_config.json        # custom config\n"
-            "  python -m src.main -k PROJ-1 PROJ-2 PROJ-3  # specific tickets\n"
+            "  python -m src.main -k PROJ-1 PROJ-2 PROJ-3 # specific tickets\n"
             "  python -m src.main -j 'status = Done'       # custom JQL filter\n"
+            "  python -m src.main --ppt -o report.json    # custom output\n"
         ),
     )
     parser.add_argument(
@@ -41,7 +44,18 @@ def main() -> int:
     parser.add_argument(
         "-o", "--output",
         metavar="FILE",
-        help="Override output file path",
+        help="Override output file path (JSON or PPTX base name when used with --ppt)",
+    )
+    parser.add_argument(
+        "--ppt",
+        action="store_true",
+        help="Also generate a PowerPoint report from PPTTemplate/Template.pptx",
+    )
+    parser.add_argument(
+        "--ppt-template",
+        metavar="PATH",
+        dest="ppt_template",
+        help="Path to a custom PPTX template (default: PPTTemplate/Template.pptx)",
     )
     args = parser.parse_args()
 
@@ -63,12 +77,34 @@ def main() -> int:
 
     try:
         if args.keys:
-            exporter.export_tickets(args.keys)
+            tickets = exporter.export_tickets(args.keys)
         else:
-            exporter.run()
+            tickets = exporter.run()
     except Exception as exc:
         print(f"Export failed: {exc}", file=sys.stderr)
         return 1
+
+    if args.ppt and tickets:
+        try:
+            json_path = Path(config.output_file).resolve()
+            pptx_out = (
+                str(json_path).replace(".json", "_pptx.pptx")
+                if json_path.suffix == ".json"
+                else str(json_path.with_suffix("_pptx.pptx"))
+            )
+            filler = PPTTemplateFiller(
+                template_path=args.ppt_template if args.ppt_template else None,
+            )
+            pptx_path = filler.fill(
+                tickets,
+                output_path=pptx_out,
+            )
+            print(f"PowerPoint written to: {pptx_path}")
+        except Exception as exc:
+            print(f"PowerPoint generation failed: {exc}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return 1
 
     return 0
 
