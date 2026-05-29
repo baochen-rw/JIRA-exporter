@@ -218,26 +218,22 @@ class JiraTicket:
         return unique
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "key": self.key,
-            "id": self.id,
             "summary": self.summary,
-            "description": self.description,
-            "status": self.status,
-            "priority": self.priority,
             "issue_type": self.issue_type,
-            "project": self.project,
-            "reporter": self.reporter,
-            "assignee": self.assignee,
-            "created": self.created,
-            "updated": self.updated,
-            "labels": self.labels,
-            "components": self.components,
-            "fix_versions": self.fix_versions,
-            "attachments": [att.__dict__ for att in self.attachments],
-            "image_urls": self.image_urls,
-            "custom_fields": self.custom_fields,
         }
+        for name, data in self.custom_fields.items():
+            if name == "Review Results":
+                continue
+            val = data.get("value")
+            if name == "Solution" and val:
+                parts = val.strip().split(maxsplit=1)
+                result["Module"] = parts[0] if len(parts) > 0 else None
+                result["Diff"] = parts[1] if len(parts) > 1 else None
+            elif val is not None or name == "Self Test Report":
+                result[name] = val
+        return result
 
 
 class JiraClient:
