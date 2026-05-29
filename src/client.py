@@ -69,7 +69,9 @@ class JiraTicket:
             rendered = raw.get("renderedBody", "")
             if isinstance(rendered, str) and rendered:
                 return rendered
-            text, _ = cls._adf_to_text(raw)
+            text, media_alts, _ = cls._adf_to_text(raw)
+            if media_alts:
+                return {"_text": text if text.strip() else None, "_media_alts": media_alts}
             return text if text.strip() else None
         if isinstance(raw, list):
             return [cls._extract_text(item) for item in raw]
@@ -138,9 +140,10 @@ class JiraTicket:
         )
 
     @classmethod
-    def _adf_to_text(cls, adf: dict) -> str:
-        """Flatten Atlassian Document Format (ADF) to plain text, extracting image URLs."""
+    def _adf_to_text(cls, adf: dict) -> tuple[str, list[str], list[str]]:
+        """Flatten Atlassian Document Format (ADF) to plain text, extracting image URLs and media alt texts."""
         urls: list[str] = []
+        media_alts: list[str] = []
         lines: list[str] = []
 
         def walk(node: Any) -> None:
@@ -159,8 +162,11 @@ class JiraTicket:
                 elif node.get("type") == "media":
                     attrs = node.get("attrs", {})
                     url = attrs.get("url", "")
+                    alt = attrs.get("alt", "")
                     if url:
                         urls.append(url)
+                    if alt:
+                        media_alts.append(alt)
                 for child in node.get("content", []):
                     walk(child)
             elif isinstance(node, list):
@@ -168,7 +174,7 @@ class JiraTicket:
                     walk(item)
 
         walk(adf)
-        return "\n".join(lines), urls
+        return "\n".join(lines), media_alts, urls
 
     @classmethod
     def _normalize_description(cls, raw: Any) -> tuple[str | None, list[str]]:
@@ -181,7 +187,7 @@ class JiraTicket:
             rendered = raw.get("renderedBody", "")
             if isinstance(rendered, str) and rendered:
                 return rendered, cls._extract_image_urls(rendered, [])
-            text, adf_urls = cls._adf_to_text(raw)
+            text, _, adf_urls = cls._adf_to_text(raw)
             html_urls = cls._extract_image_urls(text, [])
             combined = list(dict.fromkeys(adf_urls + html_urls))
             return text or None, combined
@@ -223,16 +229,31 @@ class JiraTicket:
             "summary": self.summary,
             "issue_type": self.issue_type,
         }
+
+        attachment_map: dict[str, str] = {att.filename: att.url for att in self.attachments}
+
         for name, data in self.custom_fields.items():
             if name == "Review Results":
                 continue
             val = data.get("value")
+            media_alts: list[str] = []
+            if isinstance(val, dict):
+                media_alts = val.get("_media_alts", [])
+                val = val.get("_text")
+
             if name == "Solution" and val:
                 parts = val.strip().split(maxsplit=1)
                 result["Module"] = parts[0] if len(parts) > 0 else None
                 result["Diff"] = parts[1] if len(parts) > 1 else None
-            elif val is not None or name == "Self Test Report":
+
+            if media_alts:
+                urls = [attachment_map[alt] for alt in media_alts if alt in attachment_map]
+                result[name] = urls if urls else media_alts
+            elif val is not None:
                 result[name] = val
+            elif name in ("Solution", "Self Test Report"):
+                result[name] = None
+
         return result
 
 

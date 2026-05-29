@@ -14,6 +14,7 @@ class JiraExporter:
     def __init__(self, config: JiraConfig):
         self.config = config
         self.client = JiraClient(config)
+        self._last_tickets: list | None = None
 
     def run(self) -> list[dict]:
         jql = self.config.build_jql()
@@ -27,6 +28,7 @@ class JiraExporter:
         print(f"Fetched {len(tickets)} ticket(s).")
 
         results = [t.to_dict() for t in tickets]
+        self._last_tickets = tickets
         self._write_output(results)
 
         self._print_summary(results)
@@ -37,14 +39,17 @@ class JiraExporter:
         self.client.load_field_names()
 
         results = []
+        raw_tickets = []
         for key in keys:
             try:
                 ticket = self.client.get_ticket(key, self.config.fields)
                 results.append(ticket.to_dict())
+                raw_tickets.append(ticket)
             except Exception as exc:  # pragma: no cover — surface per-ticket errors
                 print(f"  [WARN] Failed to fetch '{key}': {exc}")
 
         self._write_output(results)
+        self._last_tickets = raw_tickets
         self._print_summary(results)
         return results
 

@@ -86,18 +86,17 @@ def main() -> int:
 
     if args.ppt and tickets:
         try:
-            json_path = Path(config.output_file).resolve()
-            pptx_out = (
-                str(json_path).replace(".json", "_pptx.pptx")
-                if json_path.suffix == ".json"
-                else str(json_path.with_suffix("_pptx.pptx"))
-            )
             filler = PPTTemplateFiller(
                 template_path=args.ppt_template if args.ppt_template else None,
             )
+            attachments_map: dict[str, list] = {}
+            if exporter._last_tickets:
+                for raw_ticket in exporter._last_tickets:
+                    attachments_map[raw_ticket.key] = raw_ticket.attachments
             pptx_path = filler.fill(
                 tickets,
-                output_path=pptx_out,
+                attachments_map=attachments_map,
+                session=exporter.client.session,
             )
             print(f"PowerPoint written to: {pptx_path}")
         except Exception as exc:
