@@ -29,7 +29,19 @@ def _fill_text_shape(shape: Any, text: str, color: str | None = None) -> None:
         run = para.runs[0]
         run.text = text
         if color:
-            run.font.color.rgb = color
+            from pptx.oxml.ns import qn
+            r_elem = run._r
+            rPr = r_elem.find(qn("a:rPr"))
+            if rPr is None:
+                rPr = etree.SubElement(r_elem, qn("a:rPr"))
+            for tag in (qn("a:uFillTx"), qn("a:uLnTx")):
+                for elem in rPr.findall(tag):
+                    rPr.remove(elem)
+            for existing in rPr.findall(qn("a:solidFill")):
+                rPr.remove(existing)
+            solidFill = etree.SubElement(rPr, qn("a:solidFill"))
+            srgbClr = etree.SubElement(solidFill, qn("a:srgbClr"))
+            srgbClr.set("val", color)
     else:
         para.text = text
 
@@ -45,12 +57,15 @@ def _set_cell_text(tc: etree._Element, text: str, color: str | None = None) -> N
         return
 
     def apply_color(r_elem: etree._Element, hex_color: str) -> None:
-        """Add or replace <a:rPr> with <a:solidFill> on a run element."""
-        from pptx.oxml.ns import nsmap
+        """Add or replace <a:solidFill> inside the existing <a:rPr>, removing
+        <a:uFillTx/> so the explicit color isn't overridden by the theme."""
         rPr = r_elem.find(qn("a:rPr"))
         if rPr is None:
             rPr = etree.SubElement(r_elem, qn("a:rPr"))
-        # Remove existing solidFill
+        # Remove theme-override flags that would supersede our solidFill
+        for tag in (qn("a:uFillTx"), qn("a:uLnTx")):
+            for elem in rPr.findall(tag):
+                rPr.remove(elem)
         for existing in rPr.findall(qn("a:solidFill")):
             rPr.remove(existing)
         solidFill = etree.SubElement(rPr, qn("a:solidFill"))
@@ -119,6 +134,10 @@ def _fill_text_shape_mixed(
 
         if orig_rPr is not None:
             rPr_elem = etree.fromstring(etree.tostring(orig_rPr))
+            # Strip theme-override flags so our solidFill isn't ignored
+            for tag in (qn("a:uFillTx"), qn("a:uLnTx")):
+                for elem in rPr_elem.findall(tag):
+                    rPr_elem.remove(elem)
             r_elem.append(rPr_elem)
 
         if color:
@@ -229,26 +248,27 @@ class PPTTemplateFiller:
             str_slide = self._duplicate_slide(prs, 2)
             self._fill_ticket_slide(str_slide, ticket, "Self Test Report", attachments_map)
 
-        # ── Save ────────────────────────────────────────────────────────────
-        out = Path(output_path) if output_path else None
+        # ── Save ───────────────────────────────────────────────────────────
         prs.save(str(tmp_copy))
 
-        import datetime
-        stamp = datetime.datetime.now().strftime("%H%M%S")
-        out = Path(output_path) if output_path else None
-        if out:
-            final_path = out
+        if output_path:
+            final_path = Path(output_path)
         else:
-            final_path = self.template_path.parent.parent / f"jira_export_pptx_{stamp}.pptx"
+            final_path = self.template_path.parent.parent / "jira_export_pptx.pptx"
 
-        # Try to remove the destination if it's locked by another process
-        try:
-            if final_path.exists():
-                final_path.unlink()
-        except OSError:
-            pass
-
-        shutil.copy(str(tmp_copy), str(final_path))
+        # On Windows, a locked file may need a short wait before overwriting
+        import time
+        for attempt in range(3):
+            try:
+                if final_path.exists():
+                    final_path.unlink()
+                shutil.copy(str(tmp_copy), str(final_path))
+                break
+            except OSError:
+                if attempt < 2:
+                    time.sleep(1)
+                else:
+                    raise
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return final_path
 
@@ -272,9 +292,10 @@ class PPTTemplateFiller:
             for ticket in tickets:
                 new_row = etree.fromstring(etree.tostring(template_row))
                 cells = new_row.findall(qn("a:tc"))
-                bug_color = "FF0000" if ticket.get("issue_type", "").lower() == "bug" else None
+                is_bug = ticket.get("issue_type", "").lower() == "bug"
+                bug_color = "FF0000" if is_bug else None
                 if len(cells) >= 2:
-                    _set_cell_text(cells[0], ticket.get("Module", ""))
+                    _set_cell_text(cells[0], ticket.get("Module", ""), color=bug_color)
                     _set_cell_text(cells[1], ticket.get("key", ""), color=bug_color)
                 tbl.append(new_row)
             return
@@ -340,7 +361,7 @@ class PPTTemplateFiller:
             raw = shape.text_frame.text.strip()
 
             if raw == "[Module]":
-                _fill_text_shape(shape, module)
+                _fill_text_shape(shape, module, color=bug_color)
             elif raw in ("[key] [summary]", "[key][summary]"):
                 _fill_text_shape_mixed(
                     shape,
