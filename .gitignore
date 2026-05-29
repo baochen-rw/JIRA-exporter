@@ -1,0 +1,24 @@
+# Credentials and local config
+config.json
+*.local.json
+
+# Export output
+jira_export*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+
+# Temporary files
+*.tmp
+*.temp
+~$*
