@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -20,7 +21,10 @@ def main() -> int:
     # ── Step 3: Transform to PPT-friendly JSON ──
     if config.ppt_export:
         ppt_exporter = PPTExporter(Path(config.ppt_template), Path(config.output_dir))
-        ppt_exporter.transform_for_ppt(tickets_obj)
+        ppt_json = ppt_exporter.transform_for_ppt(tickets_obj)
+        with open(ppt_json, encoding="utf-8") as f:
+            ppt_data = json.load(f)
+        ppt_exporter.fill(ppt_data, exporter.client)
 
     return 0
 

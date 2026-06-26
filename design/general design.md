@@ -45,6 +45,26 @@ sequenceDiagram
     P-->>M: Output path
     end
 
+    rect rgb(255, 235, 235)
+    Note over M,F: Step 4 — Fill PPT template via COM
+    M->>P: Load PPT JSON
+    M->>P: fill(ppt_data, client)
+    P->>F: Copy template to output
+    P->>P: Open via COM (PowerPoint.Application)
+    P->>P: Fill Slide 1 overview table
+    P->>P: Duplicate slides 2+3 per ticket
+    P->>P: Replace text placeholders
+    P->>J: Download Solution images
+    J-->>P: Image files
+    P->>P: Insert images in grid (Slide 2)
+    P->>J: Download Self Test Report images
+    J-->>P: Image files
+    P->>P: Insert images in grid (Slide 3)
+    P->>F: Save & close PPT
+    F-->>P: Success
+    P-->>M: Output path
+    end
+
     M-->>U: Exit with status
 ```
 

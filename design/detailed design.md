@@ -77,7 +77,13 @@ classDiagram
         +Path template_path
         +Path output_dir
         +transform_for_ppt(tickets) Path
-        +fill(tickets, attachments_map, client) Path
+        +fill(tickets, client) Path
+        -_fill_overview_table(pres, tickets) void
+        -_fill_ticket_slides(pres, tickets, client) void
+        -_duplicate_slide_pair(pres, idx1, idx2) void
+        -_replace_text_in_slide(slide, title_text, module) void
+        -_insert_images_on_slide(slide, urls, client) void
+        -_find_picture_placeholder(slide) Shape|None
     }
 
     class MainModule {
@@ -136,6 +142,27 @@ sequenceDiagram
     P-->>M: Output Path
     end
 
+    rect rgb(255, 235, 235)
+    Note over M,F: Step 4 — Fill PPT template via COM
+    M->>F: open(ppt_json) → json.load() → ppt_data
+    M->>P: ppt_exporter.fill(ppt_data, exporter.client)
+    P->>F: shutil.copy2(template → output.pptx)
+    P->>P: COM Dispatch("PowerPoint.Application")
+    P->>P: Open presentation
+    P->>P: _fill_overview_table: group by module, Rows.Add()
+    P->>P: _duplicate_slide_pair × (N-1) before filling
+    P->>P: _replace_text_in_slide: [key] [summary], [Module]
+    P->>J: client.download(Solution URLs)
+    J-->>P: temp image paths
+    P->>P: _insert_images_on_slide (grid, aspect ratio)
+    P->>J: client.download(Self Test Report URLs)
+    J-->>P: temp image paths
+    P->>P: _insert_images_on_slide (grid, aspect ratio)
+    P->>F: Save → Close → Quit
+    F-->>P: jira_export_pptx.pptx
+    P-->>M: Output Path
+    end
+
     M-->>U: Exit with status
 ```
 
@@ -161,10 +188,17 @@ graph LR
         F[jira_export_pptx.json<br/>PPT-friendly JSON]
     end
 
+    subgraph "Step 4 — Fill PPT"
+        G[jira_export_pptx.json<br/>loaded into memory]
+        H[jira_export_pptx.pptx<br/>COM-filled presentation]
+    end
+
     A -->|"JiraTicket.from_dict()"| B
     B -->|"asdict(ticket)"| C
     C -->|"json.dump()"| D
     D -->|"tickets list passed directly"| E
     E -->|"PPTExporter.transform_for_ppt()"| F
+    F -->|"json.load()"| G
+    G -->|"PPTExporter.fill()"| H
 ```
 
