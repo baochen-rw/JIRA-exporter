@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Debug JIRA Exporter",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.main",
+      "args": ["VEL-16399"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true
+    }
+  ]
+}

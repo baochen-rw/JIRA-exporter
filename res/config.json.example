@@ -4,6 +4,7 @@
   "api_token": "your_api_token",
   "project_key": "your_project_key",
   "output_file": "jira_export.json",
+  "output_dir": "json_export",
   "ppt_export": false,
   "ppt_template": "PPTTemplate/Template.pptx",
   "fields": [

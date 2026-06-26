@@ -49,7 +49,6 @@ classDiagram
         +list~str~ image_urls
         +dict custom_fields
         +from_dict(data) JiraTicket
-        +to_dict() dict
         -_extract_text(raw) Any
         -_adf_to_text(adf) tuple
         -_extract_image_urls(desc) list~str~
@@ -60,27 +59,23 @@ classDiagram
         +Session session
         -str _rest_base
         -_get(path, params) dict
-        -_post(path, json_body) dict
         +load_field_names() void
-        +search(jql, fields, max_results) list~JiraTicket~
         +get_ticket(key, fields) JiraTicket
+        +download(url, suffix) str|None
     }
 
     class JiraExporter {
         +JiraConfig config
         +JiraClient client
-        -list _last_tickets
-        +run(jql) list~dict~
-        +export_tickets(keys) list~dict~
-        -_write_output(results) void
-        -_print_summary(results) void
+        +export_tickets(keys) list~JiraTicket~
+        -_write_output(tickets) void
     }
 
     class PPTTemplateFiller {
         +Path template_path
         -dict _download_cache
-        -Any _session
-        +fill(tickets, output_path, attachments_map, session) Path
+        -Any _client
+        +fill(tickets, attachments_map, client) Path
         -_fill_summary_slide(slide, tickets) void
         -_fill_ticket_slide(slide, ticket, role, attachments_map) void
         -_replace_picture(slide, shape, ticket, role, atts) void
@@ -91,40 +86,73 @@ classDiagram
     class MainModule {
         <<module>>
         +main() int
-        -_ppt_only(args, config) int
     }
 ```
 
-
-## 2. Class Relationships
+## 2. Pipeline Sequence (Detailed)
 
 ```mermaid
-graph TB
-    subgraph "definition.py"
-        CFG[JiraConfig]
-        TK[JiraTicket]
-        ATT[JiraAttachment]
-        CL[JiraClient]
-        EX[JiraExporter]
+sequenceDiagram
+    participant U as User
+    participant M as main.main()
+    participant C as JiraConfig
+    participant E as JiraExporter
+    participant J as JiraClient
+    participant API as JIRA API
+    participant F as File System
+    participant P as PPTTemplateFiller
+
+    U->>M: python -m src.main KEYS
+    M->>C: JiraConfig.from_file("config.json")
+    C-->>M: JiraConfig object
+
+    rect rgb(230, 245, 255)
+    Note over E,F: Step 1 — Fetch tickets from JIRA API
+    M->>E: JiraExporter(config)
+    M->>E: exporter.export_tickets(keys)
+    E->>J: JiraClient(config)
+    J->>API: client.load_field_names() → GET /field
+    API-->>J: Field metadata
+    loop For each key
+        J->>API: client.get_ticket(key, fields) → GET /issue/{key}
+        API-->>J: Issue JSON
+        J->>J: JiraTicket.from_dict(data)
+    end
+    J-->>E: list[JiraTicket]
     end
 
-    subgraph "Entry Point"
-        MC[main.py]
+    rect rgb(230, 255, 230)
+    Note over E,F: Step 2 — Store as JSON on File System
+    E->>E: exporter._write_output(tickets)
+    E->>F: json.dump(asdict(tickets)) → jira_export.json
+    F-->>E: Success
     end
 
-    subgraph "Presentation"
-        PPT[ppt_exporter.py<br/>PPTTemplateFiller]
+    rect rgb(255, 245, 230)
+    Note over M,P: Step 3 — Generate PowerPoint from JSON
+    M->>F: json.load(jira_export.json)
+    F-->>M: tickets (list[dict])
+    M->>M: Build attachments_map from tickets_obj
+    M->>P: PPTTemplateFiller(template_path)
+    M->>P: filler.fill(tickets, attachments_map, client)
+    P->>P: _fill_summary_slide(slide, tickets)
+    loop For each ticket
+        P->>P: _determine_role(ticket)
+        P->>P: _duplicate_slide(prs, tmpl)
+        P->>P: _fill_ticket_slide(slide, ticket, role, atts)
+        P->>P: _replace_picture(slide, shape, ticket, role, atts)
+        P->>J: client.download(url, ext)
+        J->>API: GET attachment/image URL
+        API-->>J: Binary content
+        J-->>P: Local temp file path
+        P->>P: _place_images_grid(slide, shape, paths)
+    end
+    P->>F: prs.save() → jira_export_pptx.pptx
+    F-->>P: Success
+    P-->>M: Output Path
     end
 
-    MC -->|imports| CFG
-    MC -->|imports| EX
-    MC -->|creates| PPT
-
-    EX -->|owns| CL
-    EX -->|produces| TK
-    CL -->|creates| TK
-    TK -->|contains *| ATT
-    PPT -->|consumes| ATT
+    M-->>U: Exit with status
 ```
 
 
@@ -150,7 +178,7 @@ graph LR
     end
 
     A -->|"JiraTicket.from_dict()"| B
-    B -->|"ticket.to_dict()"| C
+    B -->|"asdict(ticket)"| C
     C -->|"json.dump()"| D
     D -->|"json.load()"| E
     E -->|"PPTTemplateFiller.fill()"| F

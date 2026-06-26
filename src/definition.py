@@ -4,7 +4,8 @@ All class definitions for the JIRA Exporter project.
 
 import json
 import re
-from dataclasses import dataclass, field
+import tempfile
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +15,6 @@ import requests
 # ── Shared constants ────────────────────────────────────────────────────────
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
-
-# Shared cache: field ID -> field name (fetched once from JIRA /field API)
-FIELD_NAMES: dict[str, str] = {}
 
 IMG_TAG_RE = re.compile(
     r'<img[^>]+src=["\']([^"\']+)["\'][^>]*>', re.IGNORECASE
@@ -33,6 +31,7 @@ class JiraConfig:
     api_token: str
     project_key: str
     output_file: str = "jira_export.json"
+    output_dir: str = "json_export"
     ppt_export: bool = False
     ppt_template: str = "PPTTemplate/Template.pptx"
     fields: list[str] = field(
@@ -219,8 +218,7 @@ class JiraTicket:
         custom_fields: dict[str, Any] = {}
         for key, value in fields.items():
             if key.startswith("customfield_"):
-                display_name = FIELD_NAMES.get(key, key)
-                custom_fields[display_name] = {
+                custom_fields[key] = {
                     "id": key,
                     "value": cls._extract_text(value),
                     "raw": value,
@@ -247,36 +245,7 @@ class JiraTicket:
             custom_fields=custom_fields,
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "key": self.key,
-            "summary": self.summary,
-            "issue_type": self.issue_type,
-        }
-        attachment_map: dict[str, str] = {
-            att.filename: att.url for att in self.attachments
-        }
-        for name, data in self.custom_fields.items():
-            if name == "Review Results":
-                continue
-            val = data.get("value")
-            media_alts: list[str] = []
-            if isinstance(val, dict):
-                media_alts = val.get("_media_alts", [])
-                val = val.get("_text")
-            if name == "Solution" and val:
-                parts = val.strip().split(maxsplit=1)
-                result["Module"] = parts[0] if len(parts) > 0 else None
-                result["Solution"] = parts[1] if len(parts) > 1 else None
-                continue
-            if media_alts:
-                urls = [attachment_map[alt] for alt in media_alts if alt in attachment_map]
-                result[name] = urls if urls else media_alts
-            elif val is not None:
-                result[name] = val
-            elif name in ("Solution", "Self Test Report"):
-                result[name] = None
-        return result
+
 
 
 # ── JiraClient ──────────────────────────────────────────────────────────────
@@ -298,43 +267,34 @@ class JiraClient:
         resp.raise_for_status()
         return resp.json()
 
-    def _post(self, path: str, json_body: dict[str, Any]) -> dict[str, Any]:
-        resp = self.session.post(f"{self._rest_base}{path}", json=json_body, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
-
     def load_field_names(self) -> None:
-        """Fetch all field names from JIRA and cache them."""
-        if FIELD_NAMES:
-            return
+        """Fetch all field names from JIRA."""
         try:
             for f in self._get("/field"):
-                FIELD_NAMES[f["id"]] = f["name"]
+                pass  # Field names no longer cached
         except Exception:
             pass
-
-    def search(self, jql: str, fields: list[str], max_results: int = 100) -> list[JiraTicket]:
-        tickets: list[JiraTicket] = []
-        next_page_token: str | None = None
-        while True:
-            payload: dict[str, Any] = {
-                "jql": jql,
-                "fields": fields,
-                "maxResults": min(max_results, 100),
-            }
-            if next_page_token:
-                payload["nextPageToken"] = next_page_token
-            data = self._post("/search/jql", payload)
-            for item in data.get("issues", []):
-                tickets.append(JiraTicket.from_dict(item))
-            next_page_token = data.get("nextPageToken")
-            if not next_page_token or not data.get("issues"):
-                break
-        return tickets
 
     def get_ticket(self, key: str, fields: list[str]) -> JiraTicket:
         data = self._get(f"/issue/{key}", {"fields": ",".join(fields)})
         return JiraTicket.from_dict(data)
+
+    def download(self, url: str, suffix: str = ".png") -> str | None:
+        """Download binary content (attachment/image) to a temp file.
+
+        Uses the authenticated session so JIRA-protected attachment URLs work.
+        Returns the local file path, or None on failure.
+        """
+        try:
+            resp = self.session.get(url, timeout=60)
+            resp.raise_for_status()
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.write(resp.content)
+            tmp.close()
+            return tmp.name
+        except Exception as exc:
+            print(f"  [WARN] Failed to download '{url}': {exc}")
+            return None
 
 
 # ── JiraExporter ────────────────────────────────────────────────────────────
@@ -343,52 +303,26 @@ class JiraExporter:
     def __init__(self, config: JiraConfig):
         self.config = config
         self.client = JiraClient(config)
-        self._last_tickets: list[JiraTicket] | None = None
 
-    def run(self, jql: str) -> list[dict]:
-        print(f"Querying JIRA with JQL: {jql}")
+    def export_tickets(self, keys: list[str]) -> list[JiraTicket]:
+        print(f"@@JiraExporter@@：Exporting {len(keys)} specific ticket(s): {', '.join(keys)}")
         self.client.load_field_names()
-        tickets = self.client.search(jql=jql, fields=self.config.fields)
-        print(f"Fetched {len(tickets)} ticket(s).")
-        results = [t.to_dict() for t in tickets]
-        self._last_tickets = tickets
-        self._write_output(results)
-        self._print_summary(results)
-        return results
-
-    def export_tickets(self, keys: list[str]) -> list[dict]:
-        print(f"Exporting {len(keys)} specific ticket(s): {', '.join(keys)}")
-        self.client.load_field_names()
-        results: list[dict] = []
-        raw_tickets: list[JiraTicket] = []
+        tickets: list[JiraTicket] = []
         for key in keys:
             try:
                 ticket = self.client.get_ticket(key, self.config.fields)
-                results.append(ticket.to_dict())
-                raw_tickets.append(ticket)
+                tickets.append(ticket)
             except Exception as exc:
                 print(f"  [WARN] Failed to fetch '{key}': {exc}")
-        self._write_output(results)
-        self._last_tickets = raw_tickets
-        self._print_summary(results)
-        return results
+        self._write_output(tickets)
+        return tickets
 
-    def _write_output(self, results: list[dict]) -> None:
-        path = Path(self.config.output_file)
+    def _write_output(self, tickets: list[JiraTicket]) -> None:
+        output_dir = Path(self.config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / self.config.output_file
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
+            json.dump([asdict(t) for t in tickets], f, indent=2, ensure_ascii=False)
         print(f"Output written to: {path.resolve()}")
 
-    def _print_summary(self, results: list[dict]) -> None:
-        total_images = sum(
-            len(t.get("image_urls", []))
-            + len([
-                a for a in t.get("attachments", [])
-                if a.get("filename", "").lower().endswith(
-                    (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")
-                )
-            ])
-            for t in results
-        )
-        print(f"Total tickets: {len(results)}")
-        print(f"Total image references: {total_images}")
+
