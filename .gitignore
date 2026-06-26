@@ -1,6 +1,6 @@
 # Credentials and local config
-config.json
 *.local.json
+config.json
 
 # Export output
 jira_export*.json

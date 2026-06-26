@@ -14,8 +14,9 @@ class JiraConfig:
     email: str
     api_token: str
     project_key: str
-    jql: Optional[str] = None
     output_file: str = "jira_export.json"
+    ppt_export: bool = False
+    ppt_template: str = "PPTTemplate/Template.pptx"
     fields: list[str] = field(
         default_factory=lambda: [
             "summary",
@@ -45,9 +46,3 @@ class JiraConfig:
             raw = json.load(f)
 
         return cls(**{k: v for k, v in raw.items() if k in cls.__annotations__})
-
-    def build_jql(self) -> str:
-        base = f'project = "{self.project_key}"'
-        if self.jql:
-            return f"{base} AND {self.jql}"
-        return base

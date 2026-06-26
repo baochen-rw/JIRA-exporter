@@ -1,0 +1,29 @@
+{
+  "url": "your_jira_url",
+  "email": "your_email@example.com",
+  "api_token": "your_api_token",
+  "project_key": "your_project_key",
+  "output_file": "jira_export.json",
+  "ppt_export": false,
+  "ppt_template": "PPTTemplate/Template.pptx",
+  "fields": [
+    "summary",
+    "description",
+    "status",
+    "priority",
+    "issuetype",
+    "project",
+    "reporter",
+    "assignee",
+    "created",
+    "updated",
+    "labels",
+    "components",
+    "fixVersions",
+    "attachment",
+    "duedate",
+    "timeestimate",
+    "timeoriginalestimate",
+    "customfield_xxxxx"
+  ]
+}
