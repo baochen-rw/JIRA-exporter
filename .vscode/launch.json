@@ -6,7 +6,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "src.main",
-      "args": ["VEL-16399"],
+      "args": ["VEL-16399", "VEL-16386"],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "justMyCode": true
