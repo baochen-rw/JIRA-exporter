@@ -7,7 +7,7 @@ sequenceDiagram
     participant J as API Client
     participant API as JIRA API
     participant F as File System
-    participant P as PPT Generator
+    participant P as PPT Transformer
 
     U->>M: Run with ticket keys
     M->>C: Load configuration
@@ -35,12 +35,12 @@ sequenceDiagram
     end
 
     rect rgb(255, 245, 230)
-    Note over M,P: Step 3 — Generate PowerPoint from JSON
-    E-->>M: tickets data + attachments
-    M->>P: Create PPT generator
-    M->>P: Fill template with data
-    P->>F: Download & embed images
-    P->>F: Write PPTX output
+    Note over M,P: Step 3 — Transform to PPT-friendly JSON
+    E-->>M: tickets list (domain objects)
+    M->>P: Create PPT transformer
+    M->>P: transform_for_ppt(tickets)
+    P->>P: Resolve media alt texts to URLs
+    P->>F: Write PPT JSON output
     F-->>P: Success
     P-->>M: Output path
     end

@@ -1,3 +1,4 @@
+
 # JIRA Exporter — Detailed Class Design
 
 
@@ -13,6 +14,7 @@ classDiagram
         +str api_token
         +str project_key
         +str output_file
+        +str output_dir
         +bool ppt_export
         +str ppt_template
         +list~str~ fields
@@ -71,16 +73,11 @@ classDiagram
         -_write_output(tickets) void
     }
 
-    class PPTTemplateFiller {
+    class PPTExporter {
         +Path template_path
-        -dict _download_cache
-        -Any _client
+        +Path output_dir
+        +transform_for_ppt(tickets) Path
         +fill(tickets, attachments_map, client) Path
-        -_fill_summary_slide(slide, tickets) void
-        -_fill_ticket_slide(slide, ticket, role, attachments_map) void
-        -_replace_picture(slide, shape, ticket, role, atts) void
-        -_place_images_grid(slide, shape, paths) void
-        -_download(att, url) str|None
     }
 
     class MainModule {
@@ -100,7 +97,7 @@ sequenceDiagram
     participant J as JiraClient
     participant API as JIRA API
     participant F as File System
-    participant P as PPTTemplateFiller
+    participant P as PPTExporter
 
     U->>M: python -m src.main KEYS
     M->>C: JiraConfig.from_file("config.json")
@@ -129,25 +126,12 @@ sequenceDiagram
     end
 
     rect rgb(255, 245, 230)
-    Note over M,P: Step 3 — Generate PowerPoint from JSON
-    M->>F: json.load(jira_export.json)
-    F-->>M: tickets (list[dict])
-    M->>M: Build attachments_map from tickets_obj
-    M->>P: PPTTemplateFiller(template_path)
-    M->>P: filler.fill(tickets, attachments_map, client)
-    P->>P: _fill_summary_slide(slide, tickets)
-    loop For each ticket
-        P->>P: _determine_role(ticket)
-        P->>P: _duplicate_slide(prs, tmpl)
-        P->>P: _fill_ticket_slide(slide, ticket, role, atts)
-        P->>P: _replace_picture(slide, shape, ticket, role, atts)
-        P->>J: client.download(url, ext)
-        J->>API: GET attachment/image URL
-        API-->>J: Binary content
-        J-->>P: Local temp file path
-        P->>P: _place_images_grid(slide, shape, paths)
-    end
-    P->>F: prs.save() → jira_export_pptx.pptx
+    Note over M,P: Step 3 — Transform to PPT-friendly JSON
+    M->>P: PPTExporter(template_path, output_dir)
+    M->>P: ppt_exporter.transform_for_ppt(tickets)
+    P->>P: Build attachment lookup per ticket
+    P->>P: Resolve media_alts to attachment URLs
+    P->>F: json.dump() → jira_export_pptx.json
     F-->>P: Success
     P-->>M: Output Path
     end
@@ -168,19 +152,19 @@ graph LR
     end
 
     subgraph "Step 2 — Store"
-        C[dict<br/>flat structure]
+        C[dict<br/>via asdict]
         D[jira_export.json<br/>file on disk]
     end
 
-    subgraph "Step 3 — Generate"
-        E[dict<br/>consumed as-is]
-        F[jira_export_pptx.pptx<br/>PowerPoint file]
+    subgraph "Step 3 — Transform"
+        E[JiraTicket<br/>domain object]
+        F[jira_export_pptx.json<br/>PPT-friendly JSON]
     end
 
     A -->|"JiraTicket.from_dict()"| B
     B -->|"asdict(ticket)"| C
     C -->|"json.dump()"| D
-    D -->|"json.load()"| E
-    E -->|"PPTTemplateFiller.fill()"| F
+    D -->|"tickets list passed directly"| E
+    E -->|"PPTExporter.transform_for_ppt()"| F
 ```
 
